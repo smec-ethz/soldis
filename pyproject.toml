@@ -1,0 +1,32 @@
+[project]
+name = "soldis"
+version = "0.0.1"
+description = "A solver collection for jax."
+readme = "README.md"
+authors = [
+    { name = "florez", email = "florez@ethz.ch" }
+]
+license = "MIT"
+license-files = ["LICENSE",]
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "commitizen>=4.9.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.8,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "$version"
+version_scheme = "pep440"
+version_provider = "uv"
+update_changelog_on_bump = true
+major_version_zero = true
