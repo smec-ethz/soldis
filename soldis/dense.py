@@ -1,5 +1,14 @@
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Generic, NamedTuple, TypeAlias, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Generic,
+    Literal,
+    NamedTuple,
+    Protocol,
+    TypeAlias,
+    TypeVar,
+)
 
 import jax
 import jax.numpy as jnp
@@ -9,43 +18,30 @@ Y = TypeVar("Y", bound=Array)  # could be a pytree, but likely a jax.Array
 Args = TypeVar("Args")
 
 Fn: TypeAlias = Callable[[Y, Args], Array]
-
-SolverState = TypeVar("SolverState", bound=tuple)
-SolverOptions = TypeVar("SolverOptions", bound=NamedTuple)
+Mv: TypeAlias = Callable[[Array], Array]
 
 
-class _Solver(ABC, Generic[SolverState, Y, Args, SolverOptions]):
-    """Protocol for a dense Newton-Raphson solver."""
+class _LinearOperatorProtocol(Protocol, Generic[Y, Args]):
+    def linsolve(self, A: Array | Mv, b: Array) -> Array: ...
+    def fn(self, y: Y, args: Args) -> Array: ...
+    def linearize(self, y: Y, args: Args) -> Array | Mv: ...
 
-    options: SolverOptions
 
-    def __init__(self, fn: Fn[Y, Args], *, options: SolverOptions) -> None:
+class DirectDense(Generic[Y, Args]):
+    """Direct dense linear solver using JAX's built-in solver."""
+
+    linearize: Callable[[Y, Args], Array]
+
+    def __init__(self, fn: Fn[Y, Args], jac: Callable[[Y, Args], Array]) -> None:
         self.fn = fn
-        self.options = options
+        self.linearize = jac or jax.jacfwd(fn)
 
-    @abstractmethod
-    def init(
-        self, y0: Y, args: Args, *, options: SolverOptions | None = None
-    ) -> SolverState:
-        """Initialize the solver state."""
-        ...
+        # sanity checks
+        assert callable(self.linearize), "Linearize must be callable."
+        assert callable(self.fn), "Function must be callable."
 
-    @abstractmethod
-    def step(self, state: SolverState) -> SolverState:
-        """Perform a single iteration step."""
-        ...
-
-    def terminate(self, state: SolverState) -> Array:
-        """Check if the solver should terminate."""
-        ...
-
-
-class LinearOperatorState(NamedTuple, Generic[Y, Args]):
-    """Container for linear solver state."""
-
-    linsolve: Callable[[Array, Array], Array]
-    fn: Fn[Y, Args]
-    jacobian: Callable[[Y, Args], Array]
+    def linsolve(self, A: Array, b: Array) -> Array:
+        return jax.numpy.linalg.solve(A, b)
 
 
 class NewtonState(NamedTuple, Generic[Y, Args]):
@@ -53,35 +49,82 @@ class NewtonState(NamedTuple, Generic[Y, Args]):
     args: Args
     iteration: Array  # int
     converged: Array  # bool
-    linear_solver_state: LinearOperatorState[Y, Args]
 
 
-class NewtonOptions(NamedTuple):
-    max_iterations: int = 50
+class SolverOptions(NamedTuple):
+    maxiter: int = 50
     tol: float = 1e-10
     verbose: bool = False
-    linear_solver: Callable[[Array, Array], Array] | None = None
-    """A callable that solves linear systems of the form Ax = b. Defaults to
-    `jnp.linalg.solve`."""
 
 
-class DenseNewtonSolver(_Solver[NewtonState, Y, Args, NewtonOptions]):
+SolverOptionsT = TypeVar("SolverOptionsT", bound=SolverOptions)
+
+
+class _Solver(ABC, Generic[Y, Args, SolverOptionsT]):
+    fn: Fn[Y, Args]
+    linear_operator: _LinearOperatorProtocol[Y, Args]
+    options: SolverOptionsT
+
+    def __init__(
+        self, fn: Fn[Y, Args], linear_operator: _LinearOperatorProtocol[Y, Args]
+    ) -> None:
+        self.fn = fn
+        self.linear_operator = linear_operator
+
+    def find_root(
+        self, y0: Y, args: Args, *, jax_loop_type: Literal["while", "scan"] = "while"
+    ) -> Y:
+        state = self.init(y0, args)
+
+        def cond_fn(state: NewtonState) -> Array:
+            return jnp.logical_not(self.terminate(state))
+
+        def body_fn(state: NewtonState[Y, Args]) -> NewtonState[Y, Args]:
+            return self.step(state)
+
+        if jax_loop_type == "scan":
+
+            def scan_body_fn(
+                carry: NewtonState[Y, Args], _: Any
+            ) -> tuple[NewtonState[Y, Args], None]:
+                new_state = self.step(carry)
+                return new_state, None
+
+            max_iters = self.options.maxiter
+            states, _ = jax.lax.scan(scan_body_fn, state, None, length=max_iters)
+
+            final_state = states
+        else:
+            final_state = jax.lax.while_loop(cond_fn, body_fn, state)
+        return final_state.value
+
+    @abstractmethod
+    def init(self, y0: Y, args: Args, **options: Any) -> NewtonState[Y, Args]: ...
+
+    @abstractmethod
+    def step(self, state: NewtonState) -> NewtonState: ...
+
+    @abstractmethod
+    def terminate(self, state: NewtonState) -> Array: ...
+
+    def linearize(self, y: Y, args: Args) -> Array | Mv:
+        return self.linear_operator.linearize(y, args)
+
+
+class NewtonSolver(_Solver[Y, Args, SolverOptions]):
     """Dense Newton-Raphson solver implementation."""
 
     def init(
-        self, y0: Y, args: Args, *, options: NewtonOptions | None = None
+        self,
+        y0: Y,
+        args: Args,
+        *,
+        maxiter: int = 50,
+        tol: float = 1e-10,
+        verbose: bool = False,
     ) -> NewtonState[Y, Args]:
-        if options is not None:
-            self.options = options
+        self.options = SolverOptions(maxiter=maxiter, tol=tol, verbose=verbose)
 
-        # prepare the dense jacobian function using forward-mode autodiff
-        jacobian = jax.jacfwd(self.fn)  # linear operator but dense matrix
-
-        linear_solver_state = LinearOperatorState(
-            linsolve=self.options.linear_solver or jnp.linalg.solve,
-            fn=self.fn,
-            jacobian=jacobian,
-        )
         initial_residual = self.fn(y0, args)
         initial_converged = jax.numpy.linalg.norm(initial_residual) < self.options.tol
 
@@ -90,18 +133,17 @@ class DenseNewtonSolver(_Solver[NewtonState, Y, Args, NewtonOptions]):
             args=args,
             iteration=jnp.asarray(0),
             converged=initial_converged,
-            linear_solver_state=linear_solver_state,
         )
 
     def step(self, state: NewtonState[Y, Args]) -> NewtonState[Y, Args]:
         """Perform a single iteration step."""
-        value, args, iteration, _, linear_solver_state = state
+        value, args, iteration, _ = state
 
-        residual = linear_solver_state.fn(value, args)
-        jacobian_matrix = linear_solver_state.jacobian(value, args)
+        residual = self.fn(value, args)
+        jacobian_matrix = self.linearize(value, args)
 
         # Solve for the Newton step: J * delta = -residual
-        delta = linear_solver_state.linsolve(jacobian_matrix, -residual)
+        delta = self.linear_operator.linsolve(jacobian_matrix, -residual)
 
         new_value = value + delta
 
@@ -114,15 +156,13 @@ class DenseNewtonSolver(_Solver[NewtonState, Y, Args, NewtonOptions]):
 
     def terminate(self, state: NewtonState[Y, Args]) -> Array:
         """Check if the solver should terminate."""
-        return jnp.logical_or(
-            state.converged, state.iteration >= self.options.max_iterations
-        )
+        return jnp.logical_or(state.converged, state.iteration >= self.options.maxiter)
 
 
 def find_root(
     x0: Y,
     args: Args,
-    solver: _Solver[SolverState, Y, Args, SolverOptions],
+    solver: _Solver[Y, Args, SolverOptionsT],
 ) -> Any:
     """Find the root of a function using a dense Newton-Raphson solver.
 
@@ -134,10 +174,10 @@ def find_root(
     """
     state = solver.init(x0, args)
 
-    def cond_fn(state: SolverState) -> Array:
+    def cond_fn(state: NewtonState) -> Array:
         return jnp.logical_not(solver.terminate(state))
 
-    def body_fn(state: SolverState) -> SolverState:
+    def body_fn(state: NewtonState[Y, Args]) -> NewtonState[Y, Args]:
         return solver.step(state)
 
     final_state = jax.lax.while_loop(cond_fn, body_fn, state)
