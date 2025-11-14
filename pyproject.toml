@@ -16,6 +16,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "commitizen>=4.9.1",
+    "ipykernel>=7.1.0",
 ]
 
 [build-system]
