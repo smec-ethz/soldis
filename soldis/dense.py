@@ -4,7 +4,6 @@ from typing import (
     Callable,
     Generic,
     NamedTuple,
-    Protocol,
     TypeAlias,
     TypeVar,
     cast,
@@ -20,24 +19,27 @@ Args = TypeVar("Args")
 Fn: TypeAlias = Callable[[Y, Args], Array]
 Mv: TypeAlias = Callable[[Array], Array]  # Matrix-vector product function
 Jacobian: TypeAlias = Array | Mv
-JacobianT = TypeVar("JacobianT", bound=Jacobian, contravariant=True)
+JacobianT = TypeVar("JacobianT", bound=Jacobian, default=Array)
+
+LinearSolver: TypeAlias = Callable[[JacobianT, Array], Array]
 
 
-class LinearSolver(Protocol[JacobianT]):
-    def __call__(self, A: JacobianT, b: Array) -> Array: ...
+def cg(A: Mv, b: Array) -> Array:
+    """Conjugate Gradient linear solver for matrix-free Jacobians."""
+    x, info = jax.scipy.sparse.linalg.cg(A, b)
+    if info != 0:
+        raise RuntimeError(f"Conjugate Gradient did not converge: info={info}")
+    return x
 
 
 class LinearOperator(Generic[Y, Args, JacobianT]):
     """Base class for linear operators used in solvers."""
 
-    fn: Fn[Y, Args]
-    jac: Callable[[Y, Args], JacobianT]
-
     def __init__(
         self,
         linear_solver: LinearSolver[JacobianT],
         fn: Fn[Y, Args],
-        jac: Callable[[Y, Args], JacobianT],
+        jac: Callable[[Y, Args], JacobianT] | None = None,
     ) -> None:
         self.linear_solver = linear_solver
         self.fn = fn
@@ -79,7 +81,7 @@ class _Solver(ABC, Generic[SolverOptionsT, Y, Args, JacobianT]):
         self,
         fn: Fn[Y, Args],
         jac: Callable[[Y, Args], JacobianT] | None = None,
-        lin_solve: LinearSolver | None = None,
+        lin_solve: LinearSolver[JacobianT] | None = None,
     ) -> None:
         if lin_solve is None:
             lin_solve = jnp.linalg.solve
@@ -119,7 +121,7 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
         self,
         fn: Fn[Y, Args],
         jac: Callable[[Y, Args], JacobianT] | None = None,
-        lin_solve: LinearSolver | None = None,
+        lin_solve: LinearSolver[JacobianT] | None = None,
         *,
         maxiter: int = 50,
         tol: float = 1e-10,
