@@ -16,6 +16,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "commitizen>=4.9.1",
+    "equinox>=0.13.2",
     "ipykernel>=7.1.0",
 ]
 
