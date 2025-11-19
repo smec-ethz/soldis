@@ -19,8 +19,7 @@ Args = TypeVar("Args")
 Fn: TypeAlias = Callable[[Y, Args], Array]
 Mv: TypeAlias = Callable[[Array], Array]  # Matrix-vector product function
 Jacobian: TypeAlias = Array | Mv
-JacobianT = TypeVar("JacobianT", bound=Jacobian, default=Array)
-
+JacobianT = TypeVar("JacobianT", bound=Jacobian)
 LinearSolver: TypeAlias = Callable[[JacobianT, Array], Array]
 
 
