@@ -4,6 +4,7 @@ from typing import (
     Callable,
     Generic,
     NamedTuple,
+    Self,
     TypeAlias,
     TypeVar,
     cast,
@@ -31,22 +32,22 @@ def cg(A: Mv, b: Array) -> Array:
     return x
 
 
-class LinearOperator(Generic[Y, Args, JacobianT]):
-    """Base class for linear operators used in solvers."""
+class LinearOperator(NamedTuple, Generic[Y, Args, JacobianT]):
+    solve_fn: LinearSolver[JacobianT]
+    fn: Fn[Y, Args]
+    jac: Callable[[Y, Args], JacobianT]
 
-    def __init__(
-        self,
-        linear_solver: LinearSolver[JacobianT],
-        fn: Fn[Y, Args],
-        jac: Callable[[Y, Args], JacobianT] | None = None,
-    ) -> None:
-        self.linear_solver = linear_solver
-        self.fn = fn
-        self.jac = jac or jax.jacfwd(fn)
+    @classmethod
+    def from_fn(cls, solve_fn: LinearSolver[JacobianT], fn: Fn[Y, Args]) -> Self:
+        jac = jax.jacfwd(fn)
+        return cls(solve_fn, fn, jac)
 
-    def compute_increment(self, args: tuple[Y, Args], b: Array) -> Array:
-        A = self.jac(*args)
-        return self.linear_solver(A, b)
+
+def _compute_increment(
+    self, lin_op: LinearOperator, args: tuple[Y, Args], b: Array
+) -> Array:
+    A = lin_op.jac(*args)
+    return lin_op.solve_fn(A, b)
 
 
 class NewtonState(NamedTuple, Generic[Y, Args]):
@@ -150,8 +151,8 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
 
     def step(self, state: NewtonState[Y, Args]) -> NewtonState[Y, Args]:
         """Perform a single iteration step."""
-        delta = self.lin_op.compute_increment(
-            (state.value, state.args), -state.residual
+        delta = _compute_increment(
+            self, self.lin_op, (state.value, state.args), -state.residual
         )
         new_value = cast(Y, state.value + delta)
 
