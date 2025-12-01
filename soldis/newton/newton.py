@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import (
     Callable,
     cast,
+    overload,
 )
 
 import jax
@@ -11,7 +12,7 @@ import jax.numpy as jnp
 
 import soldis.linear._core as linear_operator
 from soldis.newton._core import SolverOptions, SolverState, _Solver
-from soldis.typing import Args, Array, Fn, JacobianT, LinearSolver, Y
+from soldis.typing import Args, Array, Fn, JacobianT, LinearSolver, Mv, Y
 
 
 @dataclass(frozen=True)
@@ -22,17 +23,43 @@ class NewtonSolverOptions(SolverOptions):
 class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
     """Dense Newton-Raphson solver implementation."""
 
+    @overload  # direct matrix branch
     def __init__(
-        self,
+        self: NewtonSolver[Y, Args, Array],
         fn: Fn[Y, Args],
-        jac: Callable[[Y, Args], JacobianT] | None = None,
-        lin_solve: LinearSolver[JacobianT] = linear_operator.direct,
+        lin_solve: LinearSolver[Array] | None = None,
+        jac: Callable[[Y, Args], Array] | None = None,
         *,
         maxiter: int = 50,
         tol: float = 1e-10,
         verbose: bool = False,
         norm_fn: Callable[[Array], Array] = jax.numpy.linalg.norm,
+    ) -> None: ...
+    @overload  # matrix-free branch
+    def __init__(
+        self: NewtonSolver[Y, Args, Mv],
+        fn: Fn[Y, Args],
+        lin_solve: LinearSolver[Mv],
+        jac: Callable[[Y, Args], Mv],
+        *,
+        maxiter: int = 50,
+        tol: float = 1e-10,
+        verbose: bool = False,
+        norm_fn: Callable[[Array], Array] = jax.numpy.linalg.norm,
+    ) -> None: ...
+    def __init__(
+        self,
+        fn,
+        lin_solve=None,
+        jac=None,
+        *,
+        maxiter=50,
+        tol=1e-10,
+        verbose=False,
+        norm_fn=jax.numpy.linalg.norm,
     ) -> None:
+        if lin_solve is None:
+            lin_solve = linear_operator.direct
         super().__init__(fn, jac, lin_solve)
         self.options = NewtonSolverOptions(
             maxiter=maxiter, tol=tol, verbose=verbose, norm_fn=norm_fn
