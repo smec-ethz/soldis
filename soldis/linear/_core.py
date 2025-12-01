@@ -22,9 +22,7 @@ class LinearOperator(NamedTuple, Generic[Y, Args, JacobianT]):
         return cls(solve_fn, fn, jac)
 
 
-def compute_increment(
-    lin_op: LinearOperator, args: tuple[Y, Args], b: Array
-) -> Array:
+def compute_increment(lin_op: LinearOperator, args: tuple[Y, Args], b: Array) -> Array:
     A = lin_op.jac(*args)
     return lin_op.solve_fn(A, b)
 

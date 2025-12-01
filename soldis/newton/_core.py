@@ -10,6 +10,7 @@ from typing import (
 import jax
 import jax.numpy as jnp
 from jax import Array
+from jax._src.tree_util import register_pytree_node_class
 
 from soldis.linear import LinearOperator
 from soldis.typing import Args, Fn, JacobianT, LinearSolver, Y
@@ -33,10 +34,35 @@ class SolverOptions:
 SolverOptionsT = TypeVar("SolverOptionsT", bound=SolverOptions)
 
 
+@register_pytree_node_class
 class _Solver(ABC, Generic[SolverOptionsT, Y, Args, JacobianT]):
     options: SolverOptionsT
     fn: Fn[Y, Args]
     lin_op: LinearOperator[Y, Args, JacobianT]
+
+    def tree_flatten(self):
+        children = (self.fn, self.lin_op)
+        aux_data = (self.options,)
+        return children, aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        (options,) = aux_data
+        fn, lin_op = children
+        return cls._rebuild(fn, lin_op, options)
+
+    @classmethod
+    def _rebuild(
+        cls,
+        fn: Fn[Y, Args],
+        lin_op: LinearOperator[Y, Args, JacobianT],
+        options: SolverOptionsT,
+    ) -> "_Solver[SolverOptionsT, Y, Args, JacobianT]":
+        obj = cls.__new__(cls)
+        obj.fn = fn
+        obj.lin_op = lin_op
+        obj.options = options
+        return obj
 
     def __init__(
         self,

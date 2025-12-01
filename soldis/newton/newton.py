@@ -1,4 +1,5 @@
 from __future__ import annotations
+from jax._src.tree_util import register_pytree_node_class
 
 from dataclasses import dataclass
 from typing import (
@@ -20,6 +21,7 @@ class NewtonSolverOptions(SolverOptions):
     norm_fn: Callable[[Array], Array] = jax.numpy.linalg.norm
 
 
+@register_pytree_node_class
 class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
     """Dense Newton-Raphson solver implementation."""
 
@@ -60,6 +62,8 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
     ) -> None:
         if lin_solve is None:
             lin_solve = linear_operator.direct
+
+        # TODO: assert jac and lin_solve are compatible
         super().__init__(fn, jac, lin_solve)
         self.options = NewtonSolverOptions(
             maxiter=maxiter, tol=tol, verbose=verbose, norm_fn=norm_fn
@@ -71,7 +75,7 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
         args: Args,
     ) -> SolverState[Y, Args]:
         initial_residual = self.fn(y0, args)
-        initial_converged = jax.numpy.linalg.norm(initial_residual) < self.options.tol
+        initial_converged = self.options.norm_fn(initial_residual) < self.options.tol
 
         return SolverState(
             value=y0,
@@ -90,7 +94,7 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
 
         # Check convergence
         new_residual = self.fn(new_value, state.args)
-        new_converged = jax.numpy.linalg.norm(new_residual) < self.options.tol
+        new_converged = self.options.norm_fn(new_residual) < self.options.tol
 
         return state._replace(
             value=new_value,
