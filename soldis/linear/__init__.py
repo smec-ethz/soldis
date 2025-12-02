@@ -1,8 +1,8 @@
-from ._core import LinearOperator, compute_increment
-from .cg import cg
+from ._core import DirectLinearSolver, LinearSolver
+from .cg import CG
 
 __all__ = [
-    "LinearOperator",
-    "compute_increment",
-    "cg",
+    "LinearSolver",
+    "DirectLinearSolver",
+    "CG",
 ]

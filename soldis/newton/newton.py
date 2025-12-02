@@ -1,5 +1,4 @@
 from __future__ import annotations
-from jax._src.tree_util import register_pytree_node_class
 
 from dataclasses import dataclass
 from typing import (
@@ -11,9 +10,8 @@ from typing import (
 import jax
 import jax.numpy as jnp
 
-import soldis.linear._core as linear_operator
 from soldis.newton._core import SolverOptions, SolverState, _Solver
-from soldis.typing import Args, Array, Fn, JacobianT, LinearSolver, Mv, Y
+from soldis.typing import Args, Array, Fn, JacobianT, LinearSolve, Mv, Y
 
 
 @dataclass(frozen=True)
@@ -21,7 +19,6 @@ class NewtonSolverOptions(SolverOptions):
     norm_fn: Callable[[Array], Array] = jax.numpy.linalg.norm
 
 
-@register_pytree_node_class
 class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
     """Dense Newton-Raphson solver implementation."""
 
@@ -29,8 +26,8 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
     def __init__(
         self: NewtonSolver[Y, Args, Array],
         fn: Fn[Y, Args],
-        lin_solve: LinearSolver[Array] | None = None,
         jac: Callable[[Y, Args], Array] | None = None,
+        lin_solver: LinearSolve[Array] | None = None,
         *,
         maxiter: int = 50,
         tol: float = 1e-10,
@@ -41,8 +38,8 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
     def __init__(
         self: NewtonSolver[Y, Args, Mv],
         fn: Fn[Y, Args],
-        lin_solve: LinearSolver[Mv],
         jac: Callable[[Y, Args], Mv],
+        lin_solver: LinearSolve[Mv],
         *,
         maxiter: int = 50,
         tol: float = 1e-10,
@@ -52,19 +49,16 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
     def __init__(
         self,
         fn,
-        lin_solve=None,
         jac=None,
+        lin_solver=None,
         *,
         maxiter=50,
         tol=1e-10,
         verbose=False,
         norm_fn=jax.numpy.linalg.norm,
     ) -> None:
-        if lin_solve is None:
-            lin_solve = linear_operator.direct
-
         # TODO: assert jac and lin_solve are compatible
-        super().__init__(fn, jac, lin_solve)
+        super().__init__(fn, jac, lin_solver)
         self.options = NewtonSolverOptions(
             maxiter=maxiter, tol=tol, verbose=verbose, norm_fn=norm_fn
         )
@@ -87,8 +81,8 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
 
     def step(self, state: SolverState[Y, Args]) -> SolverState[Y, Args]:
         """Perform a single iteration step."""
-        delta = linear_operator.compute_increment(
-            self.lin_op, (state.value, state.args), -state.residual
+        delta = self.linearization.compute_increment(
+            state.value, state.args, -state.residual
         )
         new_value = cast(Y, state.value + delta)
 

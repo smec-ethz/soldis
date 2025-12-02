@@ -1,11 +1,16 @@
 import jax
 
+from soldis.linear._core import LinearSolver, LinearSolverVariant
 from soldis.typing import Array, Mv
 
 
-def cg(A: Mv, b: Array) -> Array:
+class CG(LinearSolver):
     """Conjugate Gradient linear solver for matrix-free Jacobians."""
-    x, info = jax.scipy.sparse.linalg.cg(A, b)
-    if info != 0:
-        raise RuntimeError(f"Conjugate Gradient did not converge: info={info}")
-    return x
+
+    variant = LinearSolverVariant.MATRIX_FREE
+
+    def __call__(self, A: Mv, b: Array) -> Array:
+        x, info = jax.scipy.sparse.linalg.cg(A, b)
+        # NOTE: Currently, info is always None in JAX's CG implementation
+        # we skip checking convergence for now
+        return x
