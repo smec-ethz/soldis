@@ -1,11 +1,8 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import (
-    Callable,
-    Generic,
-    NamedTuple,
-    TypeVar,
-)
+from typing import Callable, Generic, NamedTuple, TypeVar, overload
 
 import jax
 import jax.numpy as jnp
@@ -13,7 +10,7 @@ from jax import Array
 from jax._src.tree_util import register_pytree_node_class
 
 from soldis.linear._core import DirectLinearSolver, LinearSolver, LinearSolverVariant
-from soldis.typing import Args, Fn, JacobianFunc, JacobianT, Y
+from soldis.typing import Args, Fn, JacobianFunc, JacobianT, Mv, Y
 
 
 class SolverState(NamedTuple, Generic[Y, Args]):
@@ -34,7 +31,9 @@ class SolverOptions:
 SolverOptionsT = TypeVar("SolverOptionsT", bound=SolverOptions)
 
 
-def jvp_for(func: Fn[Y, Args]) -> Callable[[Y, Args], Callable[[Y], Array]]:
+def _default_jvp_factory(
+    func: Fn[Y, Args],
+) -> Callable[[Y, Args], Callable[[Y], Array]]:
     def jvp(primal: Y, args: Args) -> Callable[[Y], Array]:
         """Returns a function that computes the Jacobian-vector product at `primal`."""
 
@@ -47,83 +46,93 @@ def jvp_for(func: Fn[Y, Args]) -> Callable[[Y, Args], Callable[[Y], Array]]:
     return jvp
 
 
-class Linearization(Generic[Y, Args, JacobianT]):
+class _Solver(ABC, Generic[SolverOptionsT, Y, Args, JacobianT]):
+    fn: Fn[Y, Args]
+    """The function for which to find the root. Usually, this is the residual."""
+
     linear_solver: LinearSolver[JacobianT]
     """Callable that takes (A, b) and returns the solution x to Ax = b. Where A is either
     a matrix or a function representing a matrix-vector product, depending on the type of
     Linearization."""
+
     jac: JacobianFunc[Y, Args, JacobianT]
     """Callable that takes (y, args) and returns the Jacobian matrix or matrix-vector
     product function."""
 
-    def __init__(
-        self,
-        linear_solver: LinearSolver[JacobianT],
-        jacobian_fn: JacobianFunc[Y, Args, JacobianT],
-    ) -> None:
-        self.linear_solver = linear_solver
-        self.jac = jacobian_fn
-
-    def compute_increment(self, y: Y, args: Args, b: Array) -> Array:
-        A = self.jac(y, args)
-        return self.linear_solver(A, b)
-
-
-class _Solver(ABC, Generic[SolverOptionsT, Y, Args, JacobianT]):
     options: SolverOptionsT
-    fn: Fn[Y, Args]
-    linearization: Linearization[Y, Args, JacobianT]
+    """Solver options. Subclasses may define custom options by extending SolverOptions."""
 
     def __init_subclass__(cls) -> None:
         """Automatically register subclasses as pytree node classes."""
         register_pytree_node_class(cls)
 
     def tree_flatten(self):
-        aux_data = (self.fn, self.linearization, self.options)
+        aux_data = (self.fn, self.linear_solver, self.jac, self.options)
         return (), aux_data
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
-        fn, lin_op, options = aux_data
-        return cls._rebuild(fn, lin_op, options)
+        fn, linear_solver, jac, options = aux_data
+        return cls(fn, linear_solver, jac, options)
 
-    @classmethod
-    def _rebuild(
-        cls,
+    @overload  # direct matrix branch
+    def __init__(
+        self: _Solver[SolverOptionsT, Y, Args, Array],
         fn: Fn[Y, Args],
-        linearization: Linearization[Y, Args, JacobianT],
-        options: SolverOptionsT,
-    ) -> "_Solver[SolverOptionsT, Y, Args, JacobianT]":
-        obj = cls.__new__(cls)
-        obj.fn = fn
-        obj.linearization = linearization
-        obj.options = options
-        return obj
-
+        lin_solver: LinearSolver[Array] | None = None,
+        jac: Callable[[Y, Args], Array] | None = None,
+        *,
+        options: SolverOptionsT | None = None,
+        **kwargs,
+    ) -> None: ...
+    @overload  # matrix-free branch
+    def __init__(
+        self: _Solver[SolverOptionsT, Y, Args, Mv],
+        fn: Fn[Y, Args],
+        lin_solver: LinearSolver[Mv],
+        jac: Callable[[Y, Args], Mv] | None = None,
+        *,
+        options: SolverOptionsT | None = None,
+        **kwargs,
+    ) -> None: ...
     def __init__(
         self,
         fn: Fn[Y, Args],
         lin_solver: LinearSolver[JacobianT] | None = None,
         jac: Callable[[Y, Args], JacobianT] | None = None,
+        *,
+        options: SolverOptionsT | None = None,
+        **kwargs,
     ) -> None:
+        self.fn = fn
+
         if lin_solver is None:
             _lin_solver = DirectLinearSolver()
         else:
             _lin_solver = lin_solver
-
-        self.fn = fn
+        self.linear_solver = _lin_solver  # ty: ignore[invalid-assignment]
 
         if jac is not None:
-            self.linearization = Linearization(_lin_solver, jac)
+            self.jac = jac
         else:
             # for matrix-free, use jvp
             if _lin_solver.variant == LinearSolverVariant.MATRIX_FREE:
-                jac_fn = jvp_for(fn)
+                jac_fn = _default_jvp_factory(fn)
             else:  # for direct, use jacfwd
                 jac_fn = jax.jacfwd(fn)
 
             # construct linearization and done
-            self.linearization = Linearization(_lin_solver, jac_fn)
+            self.jac = jac_fn  # ty: ignore[invalid-assignment]
+
+        # handle options
+        if options is None:
+            self.options = self._make_default_options(**kwargs)
+        elif kwargs:
+            raise TypeError(
+                "Pass either an options instance or option keyword arguments, not both"
+            )
+        else:
+            self.options = options
 
     def root(self, y0: Y, args: Args) -> SolverState[Y, Args]:
         state = self.init(y0, args)
@@ -137,6 +146,10 @@ class _Solver(ABC, Generic[SolverOptionsT, Y, Args, JacobianT]):
         final_state = jax.lax.while_loop(cond_fn, body_fn, state)
         return final_state
 
+    def compute_increment(self, y: Y, args: Args, b: Array) -> Array:
+        A = self.jac(y, args)
+        return self.linear_solver(A, b)
+
     @abstractmethod
     def init(self, y0: Y, args: Args) -> SolverState[Y, Args]: ...
 
@@ -145,3 +158,7 @@ class _Solver(ABC, Generic[SolverOptionsT, Y, Args, JacobianT]):
 
     @abstractmethod
     def terminate(self, state: SolverState) -> Array: ...
+
+    def _make_default_options(self, **kwargs) -> SolverOptionsT:
+        """Construct default options. Override in subclasses for custom options."""
+        return SolverOptions(**kwargs)  # type: ignore[return-value]
