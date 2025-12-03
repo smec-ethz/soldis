@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Concatenate, Generic, NamedTuple, TypeVar, overload
+from typing import Callable, Concatenate, Generic, NamedTuple, TypeVar
 
 import jax
 import jax.numpy as jnp
@@ -10,7 +10,7 @@ from jax import Array
 from jax._src.tree_util import register_pytree_node_class
 
 from soldis.linear._core import DirectLinearSolver, LinearSolver, LinearSolverVariant
-from soldis.typing import ArgsTuple, Fn, JacobianFunc, JacobianT, Mv, P, Y
+from soldis.typing import ArgsTuple, Fn, JacobianFunc, JacobianT, P, Y
 
 
 class SolverState(NamedTuple, Generic[Y, P]):
@@ -75,33 +75,13 @@ class _Solver(ABC, Generic[SolverOptionsT, Y, P, JacobianT]):
         fn, linear_solver, jac, options = aux_data
         return cls(fn, linear_solver, jac, options=options)
 
-    @overload  # direct matrix branch
-    def __init__(
-        self: _Solver[SolverOptionsT, Y, P, Array],
-        fn: Fn[Y, P],
-        lin_solver: None = None,
-        jac: None = None,
-        *,
-        options: SolverOptionsT | None = None,
-        **kwargs,
-    ) -> None: ...
-    @overload  # matrix-free branch
-    def __init__(
-        self: _Solver[SolverOptionsT, Y, P, JacobianT],
-        fn: Fn[Y, P],
-        lin_solver: LinearSolver[JacobianT],
-        jac: Callable[Concatenate[Y, P], JacobianT] | None = None,
-        *,
-        options: SolverOptionsT | None = None,
-        **kwargs,
-    ) -> None: ...
     def __init__(
         self,
-        fn,
-        lin_solver=None,
-        jac=None,
+        fn: Fn[Y, P],
+        lin_solver: LinearSolver[JacobianT] | None = None,
+        jac: JacobianFunc[Y, P, JacobianT] | None = None,
         *,
-        options=None,
+        options: SolverOptionsT | None = None,
         **kwargs,
     ) -> None:
         self.fn = fn
