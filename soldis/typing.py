@@ -1,19 +1,17 @@
-from typing import (
-    Callable,
-    TypeAlias,
-    TypeVar,
-)
+from typing import Callable, Concatenate, ParamSpec, TypeAlias, TypeVar, Unpack
 
 from jax import Array
 
 Y = TypeVar("Y", bound=Array)  # could be a pytree, but likely a jax.Array
-Args = TypeVar("Args")
+P = ParamSpec("P")
 
-Fn: TypeAlias = Callable[[Y, Args], Array]
+ArgsTuple: TypeAlias = tuple[Unpack[P.args]]
+
+Fn: TypeAlias = Callable[Concatenate[Y, P], Array]
 Mv: TypeAlias = Callable[[Array], Array]  # Matrix-vector product function
 
 Jacobian: TypeAlias = Array | Mv
 JacobianT = TypeVar("JacobianT", bound=Jacobian)
-JacobianFunc: TypeAlias = Callable[[Y, Args], JacobianT]
+JacobianFunc: TypeAlias = Callable[Concatenate[Y, P], JacobianT]
 
 LinearSolve: TypeAlias = Callable[[JacobianT, Array], Array]

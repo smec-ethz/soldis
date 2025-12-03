@@ -4,7 +4,7 @@ from soldis.linear._core import LinearSolver, LinearSolverVariant
 from soldis.typing import Array, Mv
 
 
-class CG(LinearSolver):
+class CG(LinearSolver[Mv]):
     """Conjugate Gradient linear solver for matrix-free Jacobians."""
 
     variant = LinearSolverVariant.MATRIX_FREE
