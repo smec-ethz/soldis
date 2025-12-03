@@ -13,7 +13,7 @@ from jax import Array
 from jax._src.tree_util import register_pytree_node_class
 
 from soldis.linear._core import DirectLinearSolver, LinearSolver, LinearSolverVariant
-from soldis.typing import Args, Fn, JacobianFunc, JacobianT, LinearSolve, Y
+from soldis.typing import Args, Fn, JacobianFunc, JacobianT, Y
 
 
 class SolverState(NamedTuple, Generic[Y, Args]):
@@ -48,17 +48,13 @@ def jvp_for(func: Fn[Y, Args]) -> Callable[[Y, Args], Callable[[Y], Array]]:
 
 
 class Linearization(Generic[Y, Args, JacobianT]):
-    linear_solver: LinearSolve[JacobianT]
+    linear_solver: LinearSolver[JacobianT]
     """Callable that takes (A, b) and returns the solution x to Ax = b. Where A is either
     a matrix or a function representing a matrix-vector product, depending on the type of
     Linearization."""
     jac: JacobianFunc[Y, Args, JacobianT]
     """Callable that takes (y, args) and returns the Jacobian matrix or matrix-vector
     product function."""
-
-    def __init_subclass__(cls) -> None:
-        """Automatically register subclasses as pytree node classes."""
-        register_pytree_node_class(cls)
 
     def __init__(
         self,
@@ -107,8 +103,8 @@ class _Solver(ABC, Generic[SolverOptionsT, Y, Args, JacobianT]):
     def __init__(
         self,
         fn: Fn[Y, Args],
-        jac: Callable[[Y, Args], JacobianT] | None = None,
         lin_solver: LinearSolver[JacobianT] | None = None,
+        jac: Callable[[Y, Args], JacobianT] | None = None,
     ) -> None:
         if lin_solver is None:
             _lin_solver = DirectLinearSolver()

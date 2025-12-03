@@ -26,8 +26,8 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
     def __init__(
         self: NewtonSolver[Y, Args, Array],
         fn: Fn[Y, Args],
-        jac: Callable[[Y, Args], Array] | None = None,
         lin_solver: LinearSolve[Array] | None = None,
+        jac: Callable[[Y, Args], Array] | None = None,
         *,
         maxiter: int = 50,
         tol: float = 1e-10,
@@ -38,8 +38,8 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
     def __init__(
         self: NewtonSolver[Y, Args, Mv],
         fn: Fn[Y, Args],
-        jac: Callable[[Y, Args], Mv],
         lin_solver: LinearSolve[Mv],
+        jac: Callable[[Y, Args], Mv] | None = None,
         *,
         maxiter: int = 50,
         tol: float = 1e-10,
@@ -49,8 +49,8 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
     def __init__(
         self,
         fn,
-        jac=None,
         lin_solver=None,
+        jac=None,
         *,
         maxiter=50,
         tol=1e-10,
@@ -58,7 +58,7 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, Args, JacobianT]):
         norm_fn=jax.numpy.linalg.norm,
     ) -> None:
         # TODO: assert jac and lin_solve are compatible
-        super().__init__(fn, jac, lin_solver)
+        super().__init__(fn, lin_solver, jac)
         self.options = NewtonSolverOptions(
             maxiter=maxiter, tol=tol, verbose=verbose, norm_fn=norm_fn
         )
