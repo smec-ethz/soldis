@@ -55,6 +55,13 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, P, JacobianT]):
 
     def terminate(self, state: SolverState[Y, P]) -> Array:
         """Check if the solver should terminate."""
+        if self.options.verbose:
+            jax.debug.print(
+                "Iteration {}/{}; Residual {}",
+                state.iteration,
+                self.options.maxiter,
+                self.options.norm_fn(state.residual),
+            )
         return jnp.logical_or(state.converged, state.iteration >= self.options.maxiter)
 
 
