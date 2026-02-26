@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import ClassVar, Generic
@@ -32,7 +34,7 @@ class LinearSolver(ABC, Generic[JacobianT]):
         return cls._rebuild()
 
     @classmethod
-    def _rebuild(cls) -> "LinearSolver":
+    def _rebuild(cls) -> LinearSolver[JacobianT]:
         obj = cls.__new__(cls)
         return obj
 

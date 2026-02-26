@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Concatenate, Generic, NamedTuple, TypeVar
+from typing import Any, Callable, Concatenate, Generic, NamedTuple, ParamSpec, TypeVar
 
 import jax
 import jax.numpy as jnp
@@ -10,12 +10,16 @@ from jax import Array
 from jax._src.tree_util import register_pytree_node_class
 
 from soldis.linear._core import DirectLinearSolver, LinearSolver, LinearSolverVariant
-from soldis.typing import ArgsTuple, Fn, JacobianFunc, JacobianT, P, Y
+from soldis.typing import Fn, JacobianFunc, JacobianT
+
+P = ParamSpec("P")
+Y = TypeVar("Y", bound=Array)  # could be a pytree, but likely a jax.Array
 
 
-class SolverState(NamedTuple, Generic[Y, P]):
+class SolverState(NamedTuple, Generic[Y]):
     value: Y
-    args: ArgsTuple  # Unpack[P]
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
     residual: Array
     iteration: Array  # int
     converged: Array  # bool
@@ -34,11 +38,11 @@ SolverOptionsT = TypeVar("SolverOptionsT", bound=SolverOptions)
 def _default_jvp_factory(
     func: Fn[Y, P],
 ) -> Callable[Concatenate[Y, P], Callable[[Y], Array]]:
-    def jvp(primal: Y, *args: P.args) -> Callable[[Y], Array]:
+    def jvp(primal: Y, *args: P.args, **kwargs: P.kwargs) -> Callable[[Y], Array]:
         """Returns a function that computes the Jacobian-vector product at `primal`."""
 
         def mv(v: Y) -> Array:
-            _, jvp_out = jax.jvp(lambda x: func(x, *args), (primal,), (v,))
+            _, jvp_out = jax.jvp(lambda x: func(x, *args, **kwargs), (primal,), (v,))
             return jvp_out
 
         return mv
@@ -77,9 +81,9 @@ class _Solver(ABC, Generic[SolverOptionsT, Y, P, JacobianT]):
 
     def __init__(
         self,
-        fn: Fn[Y, P],
+        fn: Callable[Concatenate[Y, P], Array],
         lin_solver: LinearSolver[JacobianT] | None = None,
-        jac: JacobianFunc[Y, P, JacobianT] | None = None,
+        jac: Callable[Concatenate[Y, P], JacobianT] | None = None,
         *,
         options: SolverOptionsT | None = None,
         **kwargs,
@@ -90,7 +94,7 @@ class _Solver(ABC, Generic[SolverOptionsT, Y, P, JacobianT]):
             _lin_solver = DirectLinearSolver()
         else:
             _lin_solver = lin_solver
-        self.linear_solver = _lin_solver  # ty: ignore[invalid-assignment]
+        self.linear_solver = _lin_solver  # pyright: ignore[reportAttributeAccessIssue]
 
         if jac is not None:
             self.jac = jac
@@ -102,7 +106,7 @@ class _Solver(ABC, Generic[SolverOptionsT, Y, P, JacobianT]):
                 jac_fn = jax.jacfwd(fn)
 
             # construct linearization and done
-            self.jac = jac_fn  # ty: ignore[invalid-assignment]
+            self.jac = jac_fn  # pyright: ignore[reportAttributeAccessIssue]
 
         # handle options
         if options is None:
@@ -114,30 +118,32 @@ class _Solver(ABC, Generic[SolverOptionsT, Y, P, JacobianT]):
         else:
             self.options = options
 
-    def root(self, y0: Y, *args: P.args) -> SolverState[Y, P]:
-        state = self.init(y0, *args)
+    def root(self, y0: Y, *args: P.args, **kwargs: P.kwargs) -> SolverState[Y]:
+        state = self.init(y0, *args, **kwargs)
 
-        def cond_fn(state: SolverState[Y, P]) -> Array:
+        def cond_fn(state: SolverState[Y]) -> Array:
             return jnp.logical_not(self.terminate(state))
 
-        def body_fn(state: SolverState[Y, P]) -> SolverState[Y, P]:
+        def body_fn(state: SolverState[Y]) -> SolverState[Y]:
             return self.step(state)
 
         final_state = jax.lax.while_loop(cond_fn, body_fn, state)
         return final_state
 
-    def compute_increment(self, y: Y, args: ArgsTuple, b: Array) -> Array:
-        A = self.jac(y, *args)
+    def compute_increment(
+        self, y: Y, b: Array, *args: P.args, **kwargs: P.kwargs
+    ) -> Array:
+        A = self.jac(y, *args, **kwargs)
         return self.linear_solver(A, b)
 
     @abstractmethod
-    def init(self, y0: Y, *args: P.args) -> SolverState[Y, P]: ...
+    def init(self, y0: Y, *args: P.args, **kwargs: P.kwargs) -> SolverState[Y]: ...
 
     @abstractmethod
-    def step(self, state: SolverState[Y, P]) -> SolverState[Y, P]: ...
+    def step(self, state: SolverState[Y]) -> SolverState[Y]: ...
 
     @abstractmethod
-    def terminate(self, state: SolverState[Y, P]) -> Array: ...
+    def terminate(self, state: SolverState[Y]) -> Array: ...
 
     def _make_default_options(self, **kwargs) -> SolverOptionsT:
         """Construct default options. Override in subclasses for custom options."""
