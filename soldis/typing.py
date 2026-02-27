@@ -10,8 +10,8 @@ ArgsTuple: TypeAlias = tuple[Unpack[P.args]]
 Fn: TypeAlias = Callable[Concatenate[Y, P], Array]
 Mv: TypeAlias = Callable[[Array], Array]  # Matrix-vector product function
 
-Jacobian: TypeAlias = Array | Mv
-JacobianT = TypeVar("JacobianT", bound=Jacobian)
+Jacobian: TypeAlias = Array | Mv | Any
+JacobianT = TypeVar("JacobianT", bound=Jacobian, default=Array)
 JacobianFunc: TypeAlias = Callable[Concatenate[Y, P], JacobianT]
 
 LinearSolve: TypeAlias = Callable[[JacobianT, Array], Array]
