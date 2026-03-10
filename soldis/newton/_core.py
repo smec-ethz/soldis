@@ -130,6 +130,14 @@ class _Solver(ABC, Generic[SolverOptionsT, Y, P, JacobianT]):
         final_state = jax.lax.while_loop(cond_fn, body_fn, state)
         return final_state
 
+    def root_offline(self, y0: Y, *args: P.args, **kwargs: P.kwargs) -> Array:
+        state = self.init(y0, *args, **kwargs)
+
+        while True:
+            if self.terminate(state):
+                break
+            state = self.step(state)
+
     def compute_increment(
         self, y: Y, b: Array, *args: P.args, **kwargs: P.kwargs
     ) -> Array:

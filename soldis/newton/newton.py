@@ -155,4 +155,11 @@ class LineSearchNewtonSolver(_Solver[LineSearchNewtonSolverOptions, Y, P, Jacobi
         )
 
     def terminate(self, state: SolverState[Y]) -> Array:
+        if self.options.verbose:
+            jax.debug.print(
+                "Iteration {}/{}; Residual {}",
+                state.iteration,
+                self.options.maxiter,
+                self.options.norm_fn(state.residual),
+            )
         return jnp.logical_or(state.converged, state.iteration >= self.options.maxiter)
