@@ -18,6 +18,7 @@ dev = [
     "commitizen>=4.9.1",
     "equinox>=0.13.2",
     "ipykernel>=7.1.0",
+    "pytest>=9.0.3",
 ]
 
 [build-system]
