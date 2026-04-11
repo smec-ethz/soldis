@@ -1,6 +1,7 @@
-from typing import Callable, Concatenate, ParamSpec, TypeAlias, TypeVar, Unpack
+from typing import Any, Callable, Concatenate, ParamSpec, TypeAlias, Unpack
 
 from jax import Array
+from typing_extensions import TypeVar  # needed for python < 3.13
 
 Y = TypeVar("Y", bound=Array)  # could be a pytree, but likely a jax.Array
 P = ParamSpec("P")
