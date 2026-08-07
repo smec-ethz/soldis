@@ -1,5 +1,5 @@
 from ._core import DirectLinearSolver, LinearSolver
-from .cg import CG
+from .cg import CG, JaxCG
 from .gmres import GMRES
 
 try:
@@ -11,6 +11,7 @@ __all__ = [
     "LinearSolver",
     "DirectLinearSolver",
     "CG",
+    "JaxCG",
     "GMRES",
 ]
 
