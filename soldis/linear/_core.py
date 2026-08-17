@@ -8,7 +8,7 @@ import jax
 from jax import Array
 from jax._src.tree_util import register_pytree_node_class
 
-from soldis.typing import JacobianT
+from soldis.typing import JacobianT, Mv
 
 
 class LinearSolverVariant(Enum):
@@ -39,7 +39,17 @@ class LinearSolver(ABC, Generic[JacobianT]):
         return obj
 
     @abstractmethod
-    def __call__(self, A: JacobianT, b: Array) -> Array:
+    def __call__(
+        self, A: JacobianT, b: Array, M: Mv
+    ) -> tuple[Array, tuple[Array, int]]:
+        """Solve the linear system Ax = b.
+        Args:
+            A: The Jacobian operator or matrix.
+            b: The right-hand side vector.
+            M: Optional preconditioner operator or matrix.
+        Returns:
+            A tuple containing the solution vector and a tuple with the residual norm and number of iterations.
+        """
         raise NotImplementedError("Subclasses must implement the __call__ method.")
 
 
