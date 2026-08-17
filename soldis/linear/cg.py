@@ -31,12 +31,17 @@ class CG(LinearSolver[Mv]):
         tol, maxiter = aux_data
         return cls(tol=tol, maxiter=maxiter)
 
-    def __call__(self, A: Mv, b: Array) -> Array:
+    def __call__(
+        self, A: Mv, b: Array, M: Mv = None
+    ) -> tuple[Array, tuple[Array, int]]:
+        if M is None:
+            M = lambda v: v
+
         x = jnp.zeros_like(b)  # derived from b, so it inherits b's sharding
         r = b - A(x)
-        p = r
+        p = M(r)
         rsold = jnp.sum(
-            r * r
+            r * p
         )  # replace jnp.vdot with jnp.sum for distributed sharding compatibility
 
         def cond_fn(state):
@@ -49,16 +54,17 @@ class CG(LinearSolver[Mv]):
             alpha = rsold / jnp.sum(p * Ap)
             x = x + alpha * p
             r = r - alpha * Ap
+            z = M(r)
             rsnew = jnp.sum(
-                r * r
+                r * z
             )  # replace jnp.vdot with jnp.sum for distributed sharding compatibility
-            p = r + (rsnew / rsold) * p
+            p = z + (rsnew / rsold) * p
             return x, r, p, rsnew, i + 1
 
-        x, _, _, _, _ = jax.lax.while_loop(
+        x, _, _, r_norm, iiter = jax.lax.while_loop(
             cond_fn, body_fn, (x, r, p, rsold, jnp.asarray(0))
         )
-        return x
+        return x, (r_norm, iiter)  # return residual norm and number of iterations
 
 
 class JaxCG(LinearSolver[Mv]):
@@ -71,8 +77,19 @@ class JaxCG(LinearSolver[Mv]):
 
     variant = LinearSolverVariant.MATRIX_FREE
 
-    def __call__(self, A: Mv, b: Array) -> Array:
-        x, info = jax.scipy.sparse.linalg.cg(A, b)
+    def __init__(self, tol: float = 1e-10, maxiter: int = 100) -> None:
+        self.tol = tol
+        self.maxiter = maxiter
+
+    def __call__(
+        self, A: Mv, b: Array, M: Mv = None
+    ) -> tuple[Array, tuple[Array, int]]:
+        x, info = jax.scipy.sparse.linalg.cg(
+            A, b, M=M, tol=self.tol, maxiter=self.maxiter
+        )
         # NOTE: Currently, info is always None in JAX's CG implementation
         # we skip checking convergence for now
-        return x
+        return x, (
+            jnp.asarray(0),
+            jnp.asarray(0),
+        )  # return residual norm and number of iterations
