@@ -19,9 +19,12 @@ class CG(LinearSolver[Mv]):
 
     variant = LinearSolverVariant.MATRIX_FREE
 
-    def __init__(self, tol: float = 1e-10, maxiter: int = 100) -> None:
+    def __init__(self, tol: float = 1e-10, maxiter: int = 100, M: Mv = None) -> None:
         self.tol = tol
         self.maxiter = maxiter
+        if M is None:
+            M = lambda v: v
+        self.preconditioner = M
 
     def tree_flatten(self):
         return (), (self.tol, self.maxiter)
@@ -31,11 +34,8 @@ class CG(LinearSolver[Mv]):
         tol, maxiter = aux_data
         return cls(tol=tol, maxiter=maxiter)
 
-    def __call__(
-        self, A: Mv, b: Array, M: Mv = None
-    ) -> tuple[Array, tuple[Array, int]]:
-        if M is None:
-            M = lambda v: v
+    def __call__(self, A: Mv, b: Array) -> tuple[Array, tuple[Array, int]]:
+        M = self.preconditioner
 
         x = jnp.zeros_like(b)  # derived from b, so it inherits b's sharding
         r = b - A(x)
@@ -77,15 +77,16 @@ class JaxCG(LinearSolver[Mv]):
 
     variant = LinearSolverVariant.MATRIX_FREE
 
-    def __init__(self, tol: float = 1e-10, maxiter: int = 100) -> None:
+    def __init__(self, tol: float = 1e-10, maxiter: int = 100, M: Mv = None) -> None:
         self.tol = tol
         self.maxiter = maxiter
+        if M is None:
+            M = lambda v: v
+        self.preconditioner = M
 
-    def __call__(
-        self, A: Mv, b: Array, M: Mv = None
-    ) -> tuple[Array, tuple[Array, int]]:
-        x, info = jax.scipy.sparse.linalg.cg(
-            A, b, M=M, tol=self.tol, maxiter=self.maxiter
+    def __call__(self, A: Mv, b: Array) -> tuple[Array, tuple[Array, int]]:
+        x, _ = jax.scipy.sparse.linalg.cg(
+            A, b, M=self.preconditioner, tol=self.tol, maxiter=self.maxiter
         )
         # NOTE: Currently, info is always None in JAX's CG implementation
         # we skip checking convergence for now

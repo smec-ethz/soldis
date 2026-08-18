@@ -40,8 +40,8 @@ class LinearSolver(ABC, Generic[JacobianT]):
 
     @abstractmethod
     def __call__(
-        self, A: JacobianT, b: Array, M: Mv
-    ) -> tuple[Array, tuple[Array, int]]:
+        self, A: JacobianT, b: Array, M: Mv = None
+    ) -> tuple[Array, tuple[Array, int] | None]:
         """Solve the linear system Ax = b.
         Args:
             A: The Jacobian operator or matrix.
@@ -58,5 +58,5 @@ class DirectLinearSolver(LinearSolver[Array]):
 
     variant = LinearSolverVariant.DIRECT
 
-    def __call__(self, A: Array, b: Array) -> Array:
-        return jax.numpy.linalg.solve(A, b)
+    def __call__(self, A: Array, b: Array) -> tuple[Array, tuple[Array, int] | None]:
+        return jax.numpy.linalg.solve(A, b), None
