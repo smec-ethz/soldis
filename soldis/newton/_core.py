@@ -67,7 +67,7 @@ def _tangent_linear_solve(matvec: Callable[[Y], Array], b: Array) -> Y:
     cg = CG()  # we could make the linear solver configurable here if desired
 
     def solve(mv, b):
-        return cg(mv, b)
+        return cg(mv, b)[0]  # ignore CG diagnostics; we only need the solution
 
     return jax.lax.custom_linear_solve(
         matvec, b, solve=solve, transpose_solve=solve, symmetric=True

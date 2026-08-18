@@ -39,7 +39,7 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, P, JacobianT]):
 
     def step(self, state: SolverState[Y, P]) -> SolverState[Y, P]:
         """Perform a single iteration step."""
-        delta = self.compute_increment(state.value, state.args, -state.residual)
+        delta, _ = self.compute_increment(state.value, state.args, -state.residual)
         new_value = cast(Y, state.value + delta)
 
         # Check convergence
@@ -95,7 +95,7 @@ class LineSearchNewtonSolver(_Solver[LineSearchNewtonSolverOptions, Y, P, Jacobi
         )
 
     def step(self, state: SolverState[Y, P]) -> SolverState[Y, P]:
-        direction = self.compute_increment(state.value, state.args, -state.residual)
+        direction, _ = self.compute_increment(state.value, state.args, -state.residual)
         current_norm = self.options.norm_fn(state.residual)
 
         def cond_fn(carry):
