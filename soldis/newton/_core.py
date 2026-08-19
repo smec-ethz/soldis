@@ -171,24 +171,33 @@ class _Solver(ABC, Generic[SolverOptionsT, Y, P, JacobianT]):
         the outer JVP transformation has already been consumed — the while_loop
         and the CG solver inside it never see the outer JVP.
         """
-        # Python-level side-channel: capture the raw Newton state from inside
-        # solve() so we can return accurate diagnostics without a second solve.
-        _captured: list[SolverState] = []
 
         def f(x: Y) -> Array:
             return self.fn(x, *args)
 
-        def solve(f: Callable[[Y], Array], x0: Y) -> Array:
-            """Run Newton from x0 and return the converged value.
+        def solve(
+            f: Callable[[Y], Array], x0: Y
+        ) -> tuple[Array, tuple[Array, Array, Array]]:
+            """Run Newton from x0 and return the converged value plus diagnostics.
 
             Called by custom_root during the (custom_jvp) forward pass.
             Because we are inside the custom_jvp rule at this point, the outer
             JVP transformation has already been consumed — _root's while_loop
             and CG solver are not traced under the outer JVP.
+
+            The diagnostics are returned as ``aux`` so that they leave as real
+            outputs of the ``custom_root`` primitive.  They are cast to float
+            because ``custom_root``'s JVP rule builds their (zero) tangents with
+            ``ad_util.zeros_like_jaxval``, which produces an int/bool tangent for
+            an int/bool primal, where ``custom_jvp`` requires ``float0``.  The
+            original dtypes are restored by the caller.
             """
             state = self._root(x0, *args)
-            _captured.append(jax.lax.stop_gradient(state))
-            return state.value
+            return state.value, (
+                state.residual,
+                state.iteration.astype(state.residual.dtype),
+                state.converged.astype(state.residual.dtype),
+            )
 
         def tangent_solve(g: Callable[[Y], Array], y: Array) -> Y:
             """Solve the tangent linear system for the backward pass.
@@ -208,17 +217,17 @@ class _Solver(ABC, Generic[SolverOptionsT, Y, P, JacobianT]):
             """
             return _tangent_linear_solve(g, y)
 
-        value_implicit = jax.lax.custom_root(f, y0, solve, tangent_solve)
+        value, (residual, iteration, converged) = jax.lax.custom_root(
+            f, y0, solve, tangent_solve, has_aux=True
+        )
 
-        # Use diagnostics captured from the primal Newton solve.  If _captured
-        # is empty (abstract-eval-only trace that never ran solve), fall back to
-        # a placeholder state with stop_gradient.
-        if _captured:
-            diag_state = _captured[-1]
-        else:
-            diag_state = jax.lax.stop_gradient(self._root(y0, *args))
-
-        return diag_state._replace(value=value_implicit)
+        return SolverState(
+            value=value,
+            args=args,
+            residual=residual,
+            iteration=iteration.astype(int),
+            converged=converged.astype(bool),
+        )
 
     def compute_increment(self, y: Y, args: ArgsTuple, b: Array) -> Array:
         A = self.jac(y, *args)
