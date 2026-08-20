@@ -15,16 +15,22 @@ class CG(LinearSolver[Mv]):
     We have to use "jnp.sum" instead of "jax.lax.psum" as we want to perform all reduce on
     all devices and "jax.lax.psum" needs an axis name and currently we want solver to be
     agnostic to partitioning.
+
+    A subclass that adds fields **must** also override ``tree_flatten`` and
+    ``tree_unflatten``; otherwise it inherits the ones below and silently loses
+    those fields on unflatten.  Default new fields to ``None`` so that mistake
+    fails loudly instead of degrading to an unpreconditioned solve.
     """
 
     variant = LinearSolverVariant.MATRIX_FREE
 
-    def __init__(self, tol: float = 1e-10, maxiter: int = 100, M: Mv = None) -> None:
+    def __init__(self, tol: float = 1e-10, maxiter: int = 100) -> None:
         self.tol = tol
         self.maxiter = maxiter
-        if M is None:
-            M = lambda v: v
-        self.preconditioner = M
+
+    def preconditioner(self, v: Array) -> Array:
+        """Apply ``M^-1`` to ``v``.  The default is the identity -- no preconditioning."""
+        return v
 
     def tree_flatten(self):
         return (), (self.tol, self.maxiter)
