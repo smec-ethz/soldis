@@ -5,7 +5,12 @@ from typing import TYPE_CHECKING
 from jax import Array
 from jax.experimental.sparse.linalg import spsolve
 
-from soldis.linear._core import LinearSolver, LinearSolverVariant
+from soldis.linear._core import (
+    LinearSolver,
+    LinearSolverResult,
+    LinearSolverVariant,
+    Preconditioner,
+)
 
 if TYPE_CHECKING:
     from tatva.sparse import ColoredMatrix
@@ -27,5 +32,7 @@ class SparseTatva(LinearSolver[ColoredMatrix]):
                 "Install it to use soldis.linear.SparseTatva."
             ) from _TATVA_IMPORT_ERROR
 
-    def __call__(self, A: ColoredMatrix, b: Array) -> Array:
-        return spsolve(A.data, A.indices, A.indptr, b)
+    def __call__(
+        self, A: ColoredMatrix, b: Array, M: Preconditioner = None
+    ) -> LinearSolverResult:
+        return spsolve(A.data, A.indices, A.indptr, b), None

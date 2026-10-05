@@ -6,8 +6,8 @@ from .newton import (
 )
 
 __all__ = [
-    "NewtonSolver",
-    "NewtonSolverOptions",
     "LineSearchNewtonSolver",
     "LineSearchNewtonSolverOptions",
+    "NewtonSolver",
+    "NewtonSolverOptions",
 ]

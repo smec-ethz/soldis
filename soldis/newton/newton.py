@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, cast
+from typing import cast
 
 import jax
 import jax.numpy as jnp
 
 from soldis.newton._core import SolverOptions, SolverState, _Solver
-from soldis.typing import Array, JacobianT, P, Y
+from soldis.typing import Array, Y
 
 
 @dataclass(frozen=True)
@@ -15,35 +16,34 @@ class NewtonSolverOptions(SolverOptions):
     norm_fn: Callable[[Array], Array] = jax.numpy.linalg.norm
 
 
-class NewtonSolver(_Solver[NewtonSolverOptions, Y, P, JacobianT]):
+class NewtonSolver[JacobianT, **P](_Solver[NewtonSolverOptions, JacobianT, P]):
     """Dense Newton-Raphson solver implementation."""
 
     def _make_default_options(self, **kwargs) -> NewtonSolverOptions:
         return NewtonSolverOptions(**kwargs)
 
-    def init(
-        self,
-        y0: Y,
-        *args: P.args,
-    ) -> SolverState[Y, P]:
-        initial_residual = self.fn(y0, *args)
+    def init(self, y0: Y, *args: P.args, **kwargs: P.kwargs) -> SolverState:
+        initial_residual = self.fn(y0, *args, **kwargs)
         initial_converged = self.options.norm_fn(initial_residual) < self.options.tol
 
         return SolverState(
             value=y0,
             args=args,
+            kwargs=kwargs,
             residual=initial_residual,
             iteration=jnp.asarray(0),
             converged=initial_converged,
         )
 
-    def step(self, state: SolverState[Y, P]) -> SolverState[Y, P]:
+    def step(self, state: SolverState) -> SolverState:
         """Perform a single iteration step."""
-        delta, _ = self.compute_increment(state.value, state.args, -state.residual)
-        new_value = cast(Y, state.value + delta)
+        delta, _ = self.compute_increment(
+            state.value, state.args, state.kwargs, -state.residual
+        )
+        new_value = state.value + delta
 
         # Check convergence
-        new_residual = self.fn(new_value, *state.args)
+        new_residual = self.fn(new_value, *state.args, **state.kwargs)
         new_converged = self.options.norm_fn(new_residual) < self.options.tol
 
         return state._replace(
@@ -53,7 +53,7 @@ class NewtonSolver(_Solver[NewtonSolverOptions, Y, P, JacobianT]):
             converged=new_converged,
         )
 
-    def terminate(self, state: SolverState[Y, P]) -> Array:
+    def terminate(self, state: SolverState) -> Array:
         """Check if the solver should terminate."""
         if self.options.verbose:
             jax.debug.print(
@@ -72,7 +72,9 @@ class LineSearchNewtonSolverOptions(NewtonSolverOptions):
     ls_c: float = 1e-4
 
 
-class LineSearchNewtonSolver(_Solver[LineSearchNewtonSolverOptions, Y, P, JacobianT]):
+class LineSearchNewtonSolver[JacobianT, **P](
+    _Solver[LineSearchNewtonSolverOptions, JacobianT, P]
+):
     """Newton-Raphson solver with backtracking line search."""
 
     def _make_default_options(self, **kwargs) -> LineSearchNewtonSolverOptions:
@@ -82,20 +84,24 @@ class LineSearchNewtonSolver(_Solver[LineSearchNewtonSolverOptions, Y, P, Jacobi
         self,
         y0: Y,
         *args: P.args,
-    ) -> SolverState[Y, P]:
-        initial_residual = self.fn(y0, *args)
+        **kwargs: P.kwargs,
+    ) -> SolverState:
+        initial_residual = self.fn(y0, *args, **kwargs)
         initial_converged = self.options.norm_fn(initial_residual) < self.options.tol
 
         return SolverState(
             value=y0,
             args=args,
+            kwargs=kwargs,
             residual=initial_residual,
             iteration=jnp.asarray(0),
             converged=initial_converged,
         )
 
-    def step(self, state: SolverState[Y, P]) -> SolverState[Y, P]:
-        direction, _ = self.compute_increment(state.value, state.args, -state.residual)
+    def step(self, state: SolverState) -> SolverState:
+        direction, _ = self.compute_increment(
+            state.value, state.args, state.kwargs, -state.residual
+        )
         current_norm = self.options.norm_fn(state.residual)
 
         def cond_fn(carry):
@@ -107,7 +113,7 @@ class LineSearchNewtonSolver(_Solver[LineSearchNewtonSolverOptions, Y, P, Jacobi
         def body_fn(carry):
             step_size, ls_iter, _, _, _, _ = carry
             candidate_value = cast(Y, state.value + step_size * direction)
-            candidate_residual = self.fn(candidate_value, *state.args)
+            candidate_residual = self.fn(candidate_value, *state.args, **state.kwargs)
             candidate_norm = self.options.norm_fn(candidate_residual)
             accepted = (
                 candidate_norm <= (1.0 - self.options.ls_c * step_size) * current_norm
@@ -133,7 +139,7 @@ class LineSearchNewtonSolver(_Solver[LineSearchNewtonSolverOptions, Y, P, Jacobi
             current_norm,
         )
 
-        step_size, _, _, new_value, new_residual, new_norm = jax.lax.while_loop(
+        _step_size, _, _, new_value, new_residual, new_norm = jax.lax.while_loop(
             cond_fn, body_fn, init_carry
         )
 
@@ -146,5 +152,5 @@ class LineSearchNewtonSolver(_Solver[LineSearchNewtonSolverOptions, Y, P, Jacobi
             converged=new_converged,
         )
 
-    def terminate(self, state: SolverState[Y, P]) -> Array:
+    def terminate(self, state: SolverState) -> Array:
         return jnp.logical_or(state.converged, state.iteration >= self.options.maxiter)

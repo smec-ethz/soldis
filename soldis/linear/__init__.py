@@ -1,19 +1,13 @@
 from ._core import DirectLinearSolver, LinearSolver
 from .cg import CG, JaxCG
 from .gmres import GMRES
-
-try:
-    from .sparse import SparseTatva
-except ModuleNotFoundError:
-    SparseTatva = None
+from .sparse import SparseTatva
 
 __all__ = [
-    "LinearSolver",
-    "DirectLinearSolver",
     "CG",
-    "JaxCG",
     "GMRES",
+    "DirectLinearSolver",
+    "JaxCG",
+    "LinearSolver",
+    "SparseTatva",
 ]
-
-if SparseTatva is not None:
-    __all__.append("SparseTatva")
