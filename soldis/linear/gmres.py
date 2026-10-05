@@ -1,7 +1,12 @@
 import jax
 import jax.numpy as jnp
 
-from soldis.linear._core import LinearSolver, LinearSolverVariant
+from soldis.linear._core import (
+    LinearSolver,
+    LinearSolverResult,
+    LinearSolverVariant,
+    Preconditioner,
+)
 from soldis.typing import Array, Mv
 
 
@@ -10,10 +15,10 @@ class GMRES(LinearSolver[Mv]):
 
     variant = LinearSolverVariant.MATRIX_FREE
 
-    def __call__(self, A: Mv, b: Array) -> Array:
+    def __call__(self, A: Mv, b: Array, M: Preconditioner = None) -> LinearSolverResult:
         x, info = jax.scipy.sparse.linalg.gmres(A, b)
         # JAX's GMRES currently returns info=None on success; skip checks for now.
-        return x
+        return x, info
 
 
 class CustomGMRES(LinearSolver[Mv]):
@@ -22,8 +27,14 @@ class CustomGMRES(LinearSolver[Mv]):
     variant = LinearSolverVariant.MATRIX_FREE
 
     def __call__(
-        self, A: Mv, b: Array, *, tol: float = 1e-6, maxiter: int | None = None
-    ) -> Array:
+        self,
+        A: Mv,
+        b: Array,
+        M: Preconditioner = None,
+        *,
+        tol: float = 1e-6,
+        maxiter: int | None = None,
+    ) -> LinearSolverResult:
         n = b.shape[0]
         m = n if maxiter is None else maxiter
 
@@ -119,4 +130,4 @@ class CustomGMRES(LinearSolver[Mv]):
         y = jax.lax.fori_loop(0, m, back_sub, y0)[:m_used]
 
         x = jnp.tensordot(y, V[:m_used], axes=1)
-        return x
+        return x, None
