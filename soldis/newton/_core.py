@@ -22,11 +22,11 @@ from soldis.typing import Fn, Jacobian, JacobianFunc, JacobianT, Y
 
 class SolverState(NamedTuple):
     value: Array
-    args: tuple[Any, ...]
-    kwargs: dict[str, Any]
     residual: Array
     iteration: Array  # int
     converged: Array  # bool
+    norm: Array  # float
+    norm_history: Array  # Initial norm followed by completed steps; NaN padding.
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,7 @@ class SolverOptions:
     maxiter: int = 50
     tol: float = 1e-10
     verbose: bool = False
+    norm_fn: Callable[[Array], Array] = jax.numpy.linalg.norm
 
 
 def _default_jvp_factory[**P](
@@ -153,10 +154,9 @@ class _Solver[SolverOptionsT: SolverOptions, JacobianT: Jacobian, **P](ABC):
             return jnp.logical_not(self.terminate(state))
 
         def body_fn(state: SolverState) -> SolverState:
-            return self.step(state)
+            return self.step(state, *args, **kwargs)
 
-        final_state = jax.lax.while_loop(cond_fn, body_fn, state)
-        return final_state
+        return jax.lax.while_loop(cond_fn, body_fn, state)
 
     def root(self, y0: Y, *args: P.args, **kwargs: P.kwargs) -> SolverState:
         """Find root with implicit differentiation via jax.lax.custom_root.
@@ -178,9 +178,7 @@ class _Solver[SolverOptionsT: SolverOptions, JacobianT: Jacobian, **P](ABC):
         def f(x: Y) -> Array:
             return self.fn(x, *args, **kwargs)
 
-        def solve(
-            f: Callable[[Y], Array], x0: Y
-        ) -> tuple[Array, tuple[Array, Array, Array]]:
+        def solve(f: Callable[[Y], Array], x0: Y) -> tuple[Array, SolverState]:
             """Run Newton from x0 and return the converged value plus diagnostics.
 
             Called by custom_root during the (custom_jvp) forward pass.
@@ -196,11 +194,7 @@ class _Solver[SolverOptionsT: SolverOptions, JacobianT: Jacobian, **P](ABC):
             original dtypes are restored by the caller.
             """
             state = self._root(x0, *args, **kwargs)
-            return state.value, (
-                state.residual,
-                state.iteration.astype(state.residual.dtype),
-                state.converged.astype(state.residual.dtype),
-            )
+            return state.value, state
 
         def tangent_solve(g: Callable[[Y], Array], y: Array) -> Y:
             """Solve the tangent linear system for the backward pass.
@@ -220,18 +214,8 @@ class _Solver[SolverOptionsT: SolverOptions, JacobianT: Jacobian, **P](ABC):
             """
             return _tangent_linear_solve(g, y)
 
-        value, (residual, iteration, converged) = jax.lax.custom_root(
-            f, y0, solve, tangent_solve, has_aux=True
-        )
-
-        return SolverState(
-            value=value,
-            args=args,
-            kwargs=kwargs,
-            residual=residual,
-            iteration=iteration.astype(int),
-            converged=converged.astype(bool),
-        )
+        value, state = jax.lax.custom_root(f, y0, solve, tangent_solve, has_aux=True)
+        return state._replace(value=value)
 
     def compute_increment(
         self, y: Y, args: tuple[Any, ...], kwargs: dict[str, Any], b: Array
@@ -243,7 +227,9 @@ class _Solver[SolverOptionsT: SolverOptions, JacobianT: Jacobian, **P](ABC):
     def init(self, y0: Y, *args: P.args, **kwargs: P.kwargs) -> SolverState: ...
 
     @abstractmethod
-    def step(self, state: SolverState) -> SolverState: ...
+    def step(
+        self, state: SolverState, *args: P.args, **kwargs: P.kwargs
+    ) -> SolverState: ...
 
     @abstractmethod
     def terminate(self, state: SolverState) -> Array: ...
